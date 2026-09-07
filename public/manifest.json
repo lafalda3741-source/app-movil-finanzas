@@ -1,0 +1,13 @@
+{
+  "name": "Finanzas Familiar",
+  "short_name": "Finanzas",
+  "description": "Carga rápida de compras, cuotas de tarjetas y gastos mensuales.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0D9488",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "192x192", "type": "image/svg+xml" },
+    { "src": "/icon.svg", "sizes": "512x512", "type": "image/svg+xml" }
+  ]
+}
