@@ -5,7 +5,22 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Limpia comillas o espacios de más que a veces quedan pegados al copiar
+// y pegar el valor en el panel de variables de entorno (Netlify, etc.).
+function limpiarValorEnv(valor) {
+  if (!valor) return "";
+  return valor.trim().replace(/^["']+|["']+$/g, "");
+}
+
+const supabaseUrl = limpiarValorEnv(import.meta.env.VITE_SUPABASE_URL);
+const supabaseAnonKey = limpiarValorEnv(import.meta.env.VITE_SUPABASE_ANON_KEY);
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error(
+    "Faltan las variables VITE_SUPABASE_URL y/o VITE_SUPABASE_ANON_KEY. " +
+    "Revisá que estén cargadas en Site configuration → Environment variables de Netlify, " +
+    "y que hayas vuelto a hacer 'Trigger deploy' después de cargarlas."
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
