@@ -75,6 +75,7 @@ export default function AppMovil() {
 
   const [cargando, setCargando] = useState(true);
   const [cargosPorTarjeta, setCargosPorTarjeta] = useState({});
+  const [saldosTarjetas, setSaldosTarjetas] = useState({}); // { [tarjetaId]: saldo } — viene de la tabla "tarjetas", mantenida por el trigger
   const [gastosMensuales, setGastosMensuales] = useState([]);
   const [categorias, setCategorias] = useState([]);
   const [sueldos, setSueldos] = useState({
@@ -113,6 +114,13 @@ export default function AppMovil() {
   useEffect(() => {
     const cargarDatos = async () => {
       try {
+        const { data: tarjetasDb } = await supabase.from("tarjetas").select("id, saldo");
+        if (tarjetasDb && tarjetasDb.length > 0) {
+          const saldos = {};
+          tarjetasDb.forEach((t) => (saldos[t.id] = Number(t.saldo) || 0));
+          setSaldosTarjetas(saldos);
+        }
+
         const { data: cats } = await supabase.from("categorias_gasto").select("*");
         setCategorias((cats || []).map((c) => ({ id: c.id, nombre: c.nombre, color: c.color })));
 
@@ -624,7 +632,26 @@ export default function AppMovil() {
 
         {!cargando && seccionActiva === "gastos" && (
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-4">Gastos Mensuales</h1>
+            <h1 className="text-2xl font-bold text-slate-900 mb-1">Gastos Mensuales</h1>
+            {(() => {
+              const sumaSaldosTarjetas = Object.values(saldosTarjetas).reduce((acc, s) => acc + (Number(s) || 0), 0);
+              const sumaGastosFijos = gastosMensuales.filter((g) => !g.esTarjeta).reduce((acc, g) => acc + g.monto, 0);
+              const totalGeneral = sumaSaldosTarjetas + sumaGastosFijos;
+              return (
+                <div className="bg-white rounded-3xl p-5 mb-5">
+                  <p className="text-sm text-slate-500 mb-1">Total general</p>
+                  <p className="text-3xl font-bold text-slate-900 mb-3">{fmt(totalGeneral)}</p>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Tarjetas (saldo)</span>
+                    <span className="font-semibold text-slate-700">{fmt(sumaSaldosTarjetas)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-1">
+                    <span className="text-slate-500">Gastos fijos</span>
+                    <span className="font-semibold text-slate-700">{fmt(sumaGastosFijos)}</span>
+                  </div>
+                </div>
+              );
+            })()}
             {categorias.map((cat) => {
               const items = gastosMensuales.filter((g) => g.categoriaId === cat.id);
               if (items.length === 0) return null;
