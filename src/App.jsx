@@ -51,10 +51,13 @@ function mesEnOffset(offset) {
 
 const fmt = (n) => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
-// Valor de un cargo en un mes dado (igual que en el Panel de Control)
+// Valor de un cargo en un mes dado (igual que en el Panel de Control) —
+// respeta el mes de inicio: antes de eso, o después de terminar, no aparece.
 function valorCargoEnMes(cargo, mesIndex) {
+  const inicio = cargo.mesInicio || 0;
+  if (mesIndex < inicio) return null;
   if (cargo.cuotaTotal == null) return cargo.monto;
-  return mesIndex < cargo.cuotaTotal ? cargo.monto : null;
+  return mesIndex < inicio + cargo.cuotaTotal ? cargo.monto : null;
 }
 
 const SECCIONES = [
@@ -129,7 +132,7 @@ export default function AppMovil() {
         TARJETAS.forEach((t) => (agrupados[t.id] = []));
         (cargosDb || []).forEach((c) => {
           if (!agrupados[c.tarjeta_id]) agrupados[c.tarjeta_id] = [];
-          agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total });
+          agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total, mesInicio: c.mes_inicio || 0 });
         });
         setCargosPorTarjeta(agrupados);
 
@@ -187,13 +190,23 @@ export default function AppMovil() {
     descripcion: "",
     importe: "",
     cuotas: "1",
+    mesInicio: 1,
   });
+
+  // El mes de inicio del formulario sigue al mes seleccionado en la cabecera
+  // cada vez que entrás a "Carga de Compras" — pero seguís pudiendo cambiarlo a mano.
+  useEffect(() => {
+    if (seccionActiva === "carga") {
+      setFormCompra((prev) => ({ ...prev, mesInicio: mesIndex }));
+    }
+  }, [seccionActiva, mesIndex]);
 
   const guardarCompra = async () => {
     if (!formCompra.descripcion.trim() || !formCompra.importe) return;
     const cuotaTotal = Number(formCompra.cuotas) || 1;
     const montoPorCuota = Number(formCompra.importe) / cuotaTotal;
-    const nuevo = { id: `c${Date.now()}`, nombre: formCompra.descripcion.trim(), monto: montoPorCuota, cuotaTotal };
+    const mesInicio = Number(formCompra.mesInicio) || 0;
+    const nuevo = { id: `c${Date.now()}`, nombre: formCompra.descripcion.trim(), monto: montoPorCuota, cuotaTotal, mesInicio };
 
     setCargosPorTarjeta((prev) => ({
       ...prev,
@@ -206,11 +219,12 @@ export default function AppMovil() {
       nombre: nuevo.nombre,
       monto: nuevo.monto,
       cuota_total: nuevo.cuotaTotal,
+      mes_inicio: mesInicio,
       orden: (cargosPorTarjeta[formCompra.tarjetaId] || []).length,
     });
     if (error) console.error("Error guardando compra:", error);
 
-    setFormCompra({ tarjetaId: formCompra.tarjetaId, descripcion: "", importe: "", cuotas: "1" });
+    setFormCompra({ tarjetaId: formCompra.tarjetaId, descripcion: "", importe: "", cuotas: "1", mesInicio });
   };
 
   // ---- Cuotas de Tarjetas: editar / eliminar cargo ----
@@ -478,6 +492,17 @@ export default function AppMovil() {
                 className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
               />
 
+              <label className="block text-sm text-slate-600 mb-2">Mes de inicio</label>
+              <select
+                value={formCompra.mesInicio}
+                onChange={(e) => setFormCompra({ ...formCompra, mesInicio: Number(e.target.value) })}
+                className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
+              >
+                {MESES.map((m, i) => (
+                  <option key={m} value={i}>{m}</option>
+                ))}
+              </select>
+
               <label className="block text-sm text-slate-600 mb-2">Importe Total</label>
               <input
                 type="number"
@@ -552,7 +577,10 @@ export default function AppMovil() {
 
             {/* Un banner + lista de cargos por cada tarjeta */}
             {TARJETAS.map((t) => {
-              const cargos = cargosPorTarjeta[t.id] || [];
+              const todosLosCargos = cargosPorTarjeta[t.id] || [];
+              // Solo se listan los cargos activos en el mes seleccionado en la cabecera —
+              // los que ya terminaron (o todavía no arrancaron) quedan ocultos.
+              const cargos = todosLosCargos.filter((c) => valorCargoEnMes(c, mesIndex) != null);
               const totalMes = cargos.reduce((acc, c) => acc + (valorCargoEnMes(c, mesIndex) || 0), 0);
               return (
                 <div key={t.id} className="rounded-3xl overflow-hidden mb-5">
@@ -565,10 +593,12 @@ export default function AppMovil() {
                     <p className="text-white/80 text-sm">Total del mes</p>
                   </div>
                   <div className="bg-white">
-                    {cargos.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Sin cargos cargados</p>}
+                    {cargos.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Sin cargos activos este mes</p>}
                     {cargos.map((c) => {
                       const cuotaTotal = c.cuotaTotal || 1;
-                      const progresoPct = Math.min((1 / cuotaTotal) * 100, 100);
+                      const mesInicioCargo = c.mesInicio || 0;
+                      const cuotaActual = Math.min(mesIndex - mesInicioCargo + 1, cuotaTotal);
+                      const progresoPct = Math.min((cuotaActual / cuotaTotal) * 100, 100);
                       const esRecurrente = cuotaTotal >= 100;
                       const totalCargo = esRecurrente ? c.monto : c.monto * cuotaTotal;
                       return (
@@ -608,7 +638,7 @@ export default function AppMovil() {
                             </div>
                           </div>
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-semibold" style={{ color: t.color }}>1/{cuotaTotal}</span>
+                            <span className="text-sm font-semibold" style={{ color: t.color }}>{cuotaActual}/{cuotaTotal}</span>
                             <span className="text-sm font-bold text-slate-800">{fmt(c.monto)}/mes</span>
                           </div>
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-2">
@@ -616,7 +646,7 @@ export default function AppMovil() {
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500">
                             <span className="flex items-center gap-1">
-                              <Calendar size={12} /> Termina: {mesEnOffset(cuotaTotal - 1)}
+                              <Calendar size={12} /> Termina: {mesEnOffset(mesInicioCargo + cuotaTotal - 1)}
                             </span>
                             <span>Total: {fmt(totalCargo)}</span>
                           </div>
