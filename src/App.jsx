@@ -16,6 +16,10 @@ import {
   Calendar,
   HandCoins,
   TrendingUp,
+  TrendingDown,
+  LayoutDashboard,
+  PiggyBank,
+  CheckCircle2,
 } from "lucide-react";
 
 // ============================================================
@@ -60,7 +64,13 @@ function valorCargoEnMes(cargo, mesIndex) {
   return mesIndex < inicio + cargo.cuotaTotal ? cargo.monto : null;
 }
 
+// Suma de todos los cargos de una tarjeta en un mes dado (igual que en el Panel de Control).
+function totalTarjetaEnMes(cargosTarjeta, mesIndex) {
+  return (cargosTarjeta || []).reduce((acc, c) => acc + (valorCargoEnMes(c, mesIndex) || 0), 0);
+}
+
 const SECCIONES = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "carga", label: "Carga de Compras", icon: Plus },
   { id: "gastos", label: "Gastos Mensuales", icon: ListChecks },
   { id: "tarjetas", label: "Cuotas de Tarjetas", icon: CreditCard },
@@ -88,6 +98,34 @@ export default function AppMovil() {
   const [aumentoPorcPorPersona, setAumentoPorcPorPersona] = useState({ ariel: "", cielo: "" });
   const [editandoSueldo, setEditandoSueldo] = useState(null); // "ariel" | "cielo" | null
   const [editandoAumento, setEditandoAumento] = useState(null); // "ariel" | "cielo" | null
+
+  // ---- Otros ingresos (además de los sueldos) ----
+  const [ingresosExtra, setIngresosExtra] = useState([]); // { id, nombre, monto }
+  const [modalNuevoIngreso, setModalNuevoIngreso] = useState(false);
+  const [formIngreso, setFormIngreso] = useState({ nombre: "", monto: "" });
+  const [editandoIngresoExtra, setEditandoIngresoExtra] = useState(null); // "id:campo"
+
+  const actualizarCampoIngresoExtra = async (id, campo, valor) => {
+    setIngresosExtra((prev) => prev.map((ig) => (ig.id === id ? { ...ig, [campo]: valor } : ig)));
+    const { error } = await supabase.from("ingresos_extra").update({ [campo]: valor }).eq("id", id);
+    if (error) console.error("Error actualizando ingreso extra:", error);
+  };
+
+  const eliminarIngresoExtra = async (id) => {
+    setIngresosExtra((prev) => prev.filter((ig) => ig.id !== id));
+    const { error } = await supabase.from("ingresos_extra").delete().eq("id", id);
+    if (error) console.error("Error eliminando ingreso extra:", error);
+  };
+
+  const agregarIngresoExtra = async () => {
+    if (!formIngreso.nombre.trim() || !formIngreso.monto) return;
+    const nuevo = { id: `ig${Date.now()}`, nombre: formIngreso.nombre.trim(), monto: Number(formIngreso.monto) };
+    setIngresosExtra((prev) => [...prev, nuevo]);
+    const { error } = await supabase.from("ingresos_extra").insert(nuevo);
+    if (error) console.error("Error guardando ingreso extra:", error);
+    setFormIngreso({ nombre: "", monto: "" });
+    setModalNuevoIngreso(false);
+  };
 
   // ---- PIN ----
   const ingresarDigito = (d) => {
@@ -132,16 +170,37 @@ export default function AppMovil() {
         TARJETAS.forEach((t) => (agrupados[t.id] = []));
         (cargosDb || []).forEach((c) => {
           if (!agrupados[c.tarjeta_id]) agrupados[c.tarjeta_id] = [];
-          agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total, mesInicio: c.mes_inicio || 0 });
+          agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total, mesInicio: Number.isFinite(Number(c.mes_inicio)) ? Number(c.mes_inicio) : 0 });
         });
         setCargosPorTarjeta(agrupados);
 
         const { data: gastosDb } = await supabase.from("gastos_mensuales").select("*");
+        let listaGastos = gastosDb || [];
+
+        // Reparación automática: si falta alguna de las 4 tarjetas, la vuelve a crear.
+        const idsTarjetaPresentes = new Set(listaGastos.filter((g) => g.es_tarjeta).map((g) => g.tarjeta_id));
+        const faltantesTarjeta = TARJETAS.filter((t) => !idsTarjetaPresentes.has(t.id));
+        if (faltantesTarjeta.length > 0) {
+          const nuevasFilas = faltantesTarjeta.map((t) => ({
+            id: `gm-${t.id}`,
+            tarjeta_id: t.id,
+            nombre: t.nombre,
+            monto: 0,
+            es_tarjeta: true,
+            categoria_id: "cat-tarjetas",
+            pagado: false,
+          }));
+          const { error } = await supabase.from("gastos_mensuales").insert(nuevasFilas);
+          if (!error) listaGastos = [...listaGastos, ...nuevasFilas];
+        }
+
         setGastosMensuales(
-          (gastosDb || []).map((g) => ({
+          listaGastos.map((g) => ({
             id: g.id,
             nombre: g.nombre,
             monto: Number(g.monto),
+            esTarjeta: g.es_tarjeta,
+            tarjetaId: g.tarjeta_id,
             categoriaId: g.categoria_id,
             pagado: g.pagado,
           }))
@@ -175,6 +234,9 @@ export default function AppMovil() {
             aumentos_por_mes: nuevosSueldos[key].aumentosPorMes,
           });
         }
+
+        const { data: ingresosExtraDb } = await supabase.from("ingresos_extra").select("*");
+        setIngresosExtra((ingresosExtraDb || []).map((ig) => ({ id: ig.id, nombre: ig.nombre, monto: Number(ig.monto) })));
       } catch (err) {
         console.error("Error cargando datos compartidos:", err);
       } finally {
@@ -201,6 +263,9 @@ export default function AppMovil() {
     }
   }, [seccionActiva, mesIndex]);
 
+  const [compraGuardadaOk, setCompraGuardadaOk] = useState(false);
+  const [erroGuardarCompra, setErrorGuardarCompra] = useState(false);
+
   const guardarCompra = async () => {
     if (!formCompra.descripcion.trim() || !formCompra.importe) return;
     const cuotaTotal = Number(formCompra.cuotas) || 1;
@@ -222,9 +287,17 @@ export default function AppMovil() {
       mes_inicio: mesInicio,
       orden: (cargosPorTarjeta[formCompra.tarjetaId] || []).length,
     });
-    if (error) console.error("Error guardando compra:", error);
+
+    if (error) {
+      console.error("Error guardando compra:", error);
+      setErrorGuardarCompra(true);
+      setTimeout(() => setErrorGuardarCompra(false), 2600);
+      return;
+    }
 
     setFormCompra({ tarjetaId: formCompra.tarjetaId, descripcion: "", importe: "", cuotas: "1", mesInicio });
+    setCompraGuardadaOk(true);
+    setTimeout(() => setCompraGuardadaOk(false), 2200);
   };
 
   // ---- Cuotas de Tarjetas: editar / eliminar cargo ----
@@ -461,6 +534,64 @@ export default function AppMovil() {
       <main className="p-4 pb-10">
         {cargando && <p className="text-center text-sm text-slate-400 py-10">Cargando datos...</p>}
 
+        {!cargando && seccionActiva === "dashboard" && (
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 mb-1">Dashboard</h1>
+            <p className="text-sm text-slate-500 mb-4">Resumen de {MESES[mesIndex]}</p>
+
+            {(() => {
+              const ingresoArielMes = sueldos.ariel.montosPorMes[mesIndex] || 0;
+              const ingresoCieloMes = sueldos.cielo.montosPorMes[mesIndex] || 0;
+              const totalIngresosExtra = ingresosExtra.reduce((acc, ig) => acc + ig.monto, 0);
+              const ingresosMes = ingresoArielMes + ingresoCieloMes + totalIngresosExtra;
+
+              const sumaTarjetasDelMes = TARJETAS.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
+              const sumaGastosFijos = gastosMensuales.filter((g) => !g.esTarjeta).reduce((acc, g) => acc + g.monto, 0);
+              const gastosMes = sumaTarjetasDelMes + sumaGastosFijos;
+
+              const ahorroMes = ingresosMes - gastosMes;
+
+              return (
+                <div className="bg-white rounded-3xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: "#DCFCE7" }}>
+                        <TrendingUp size={17} style={{ color: "#16A34A" }} />
+                      </div>
+                      <span className="text-sm text-slate-600">Ingresos del mes</span>
+                    </div>
+                    <span className="text-lg font-bold" style={{ color: "#16A34A" }}>{fmt(ingresosMes)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: "#FEE2E2" }}>
+                        <TrendingDown size={17} style={{ color: "#EF4444" }} />
+                      </div>
+                      <span className="text-sm text-slate-600">Gastos totales del mes</span>
+                    </div>
+                    <span className="text-lg font-bold" style={{ color: "#EF4444" }}>{fmt(gastosMes)}</span>
+                  </div>
+
+                  <div className="h-px bg-slate-100 my-1" />
+
+                  <div className="flex items-center justify-between mt-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: `${persona.color}1F` }}>
+                        <PiggyBank size={17} style={{ color: persona.color }} />
+                      </div>
+                      <span className="text-sm font-medium text-slate-700">{ahorroMes >= 0 ? "Ahorro del mes" : "Déficit del mes"}</span>
+                    </div>
+                    <span className="text-2xl font-bold" style={{ color: ahorroMes >= 0 ? persona.color : "#EF4444" }}>
+                      {fmt(ahorroMes)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {!cargando && seccionActiva === "carga" && (
           <div>
             <h1 className="text-2xl font-bold text-slate-900 mb-4">Carga Rápida de Compras</h1>
@@ -521,12 +652,38 @@ export default function AppMovil() {
                 className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
               />
 
+              {compraGuardadaOk && (
+                <div
+                  className="flex items-center gap-2 rounded-2xl px-4 py-3 mb-4 text-sm font-medium"
+                  style={{ background: "#DCFCE7", color: "#16A34A" }}
+                >
+                  <CheckCircle2 size={18} />
+                  ¡Gasto cargado con éxito!
+                </div>
+              )}
+              {erroGuardarCompra && (
+                <div
+                  className="flex items-center gap-2 rounded-2xl px-4 py-3 mb-4 text-sm font-medium"
+                  style={{ background: "#FEE2E2", color: "#EF4444" }}
+                >
+                  No se pudo guardar. Probá de nuevo.
+                </div>
+              )}
+
               <button
                 onClick={guardarCompra}
-                className="w-full rounded-2xl py-4 text-white font-semibold flex items-center justify-center gap-2"
-                style={{ background: "#0D9488" }}
+                className="w-full rounded-2xl py-4 text-white font-semibold flex items-center justify-center gap-2 transition-colors duration-300"
+                style={{ background: compraGuardadaOk ? "#16A34A" : "#0D9488" }}
               >
-                <Plus size={18} /> Guardar Compra
+                {compraGuardadaOk ? (
+                  <>
+                    <CheckCircle2 size={18} /> ¡Guardado!
+                  </>
+                ) : (
+                  <>
+                    <Plus size={18} /> Guardar Compra
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -664,16 +821,16 @@ export default function AppMovil() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 mb-1">Gastos Mensuales</h1>
             {(() => {
-              const sumaSaldosTarjetas = Object.values(saldosTarjetas).reduce((acc, s) => acc + (Number(s) || 0), 0);
+              const sumaTarjetasDelMes = TARJETAS.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
               const sumaGastosFijos = gastosMensuales.filter((g) => !g.esTarjeta).reduce((acc, g) => acc + g.monto, 0);
-              const totalGeneral = sumaSaldosTarjetas + sumaGastosFijos;
+              const totalGeneral = sumaTarjetasDelMes + sumaGastosFijos;
               return (
                 <div className="bg-white rounded-3xl p-5 mb-5">
                   <p className="text-sm text-slate-500 mb-1">Total general</p>
                   <p className="text-3xl font-bold text-slate-900 mb-3">{fmt(totalGeneral)}</p>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-500">Tarjetas (saldo)</span>
-                    <span className="font-semibold text-slate-700">{fmt(sumaSaldosTarjetas)}</span>
+                    <span className="text-slate-500">Tarjetas ({MESES[mesIndex]})</span>
+                    <span className="font-semibold text-slate-700">{fmt(sumaTarjetasDelMes)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm mt-1">
                     <span className="text-slate-500">Gastos fijos</span>
@@ -682,7 +839,9 @@ export default function AppMovil() {
                 </div>
               );
             })()}
-            {categorias.map((cat) => {
+            {[...categorias]
+              .sort((a, b) => (a.id === "cat-tarjetas" ? -1 : b.id === "cat-tarjetas" ? 1 : 0))
+              .map((cat) => {
               const items = gastosMensuales.filter((g) => g.categoriaId === cat.id);
               if (items.length === 0) return null;
               return (
@@ -711,7 +870,9 @@ export default function AppMovil() {
                         >
                           {g.nombre}
                         </span>
-                        <span className="text-sm font-semibold text-slate-700 tabular-nums">{fmt(g.monto)}</span>
+                        <span className="text-sm font-semibold text-slate-700 tabular-nums">
+                          {fmt(g.esTarjeta ? totalTarjetaEnMes(cargosPorTarjeta[g.tarjetaId], mesIndex) : g.monto)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -723,10 +884,19 @@ export default function AppMovil() {
 
         {!cargando && seccionActiva === "ingresos" && (
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-1">Ingresos</h1>
+            <div className="flex items-start justify-between mb-1 gap-3">
+              <h1 className="text-2xl font-bold text-slate-900">Ingresos</h1>
+              <button
+                onClick={() => setModalNuevoIngreso(true)}
+                className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium text-white shrink-0 whitespace-nowrap"
+                style={{ background: persona.color }}
+              >
+                <Plus size={14} /> Agregar ingreso
+              </button>
+            </div>
             <p className="text-sm text-slate-500 mb-4">Sueldos de {MESES[mesIndex]}</p>
 
-            <div className="space-y-4">
+            <div className="space-y-4 mb-5">
               {Object.entries(sueldos).map(([key, s]) => {
                 const colorPersona = PERSONAS[key].color;
                 return (
@@ -790,6 +960,122 @@ export default function AppMovil() {
                   </div>
                 );
               })}
+            </div>
+
+            {/* Otros ingresos */}
+            {ingresosExtra.length > 0 && (
+              <>
+                <h3 className="text-sm font-semibold mb-2 text-slate-700">
+                  Otros ingresos <span className="font-normal text-slate-400">({ingresosExtra.length})</span>
+                </h3>
+                <div className="bg-white rounded-3xl overflow-hidden">
+                  {ingresosExtra.map((ig, i, arr) => (
+                    <div
+                      key={ig.id}
+                      className="flex items-center gap-3 px-4 py-3.5"
+                      style={i < arr.length - 1 ? { borderBottom: "1px solid #F1F5F9" } : undefined}
+                    >
+                      <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#DCFCE7" }}>
+                        <HandCoins size={16} style={{ color: "#16A34A" }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {editandoIngresoExtra === `${ig.id}:nombre` ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={ig.nombre}
+                            onChange={(e) => actualizarCampoIngresoExtra(ig.id, "nombre", e.target.value)}
+                            onBlur={() => setEditandoIngresoExtra(null)}
+                            onKeyDown={(e) => e.key === "Enter" && setEditandoIngresoExtra(null)}
+                            className="text-sm font-medium border-b-2 outline-none w-full"
+                            style={{ borderColor: persona.color }}
+                          />
+                        ) : (
+                          <p
+                            className="text-sm font-medium text-slate-900"
+                            onClick={() => setEditandoIngresoExtra(`${ig.id}:nombre`)}
+                          >
+                            {ig.nombre}
+                          </p>
+                        )}
+                      </div>
+                      {editandoIngresoExtra === `${ig.id}:monto` ? (
+                        <input
+                          autoFocus
+                          type="number"
+                          defaultValue={ig.monto}
+                          onBlur={(e) => {
+                            const n = Number(e.target.value);
+                            if (!isNaN(n) && n >= 0) actualizarCampoIngresoExtra(ig.id, "monto", n);
+                            setEditandoIngresoExtra(null);
+                          }}
+                          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                          className="w-24 text-right text-sm font-semibold border-b-2 outline-none tabular-nums shrink-0"
+                          style={{ borderColor: persona.color }}
+                        />
+                      ) : (
+                        <span
+                          className="text-sm font-semibold text-slate-700 tabular-nums shrink-0"
+                          onClick={() => setEditandoIngresoExtra(`${ig.id}:monto`)}
+                        >
+                          {fmt(ig.monto)}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => eliminarIngresoExtra(ig.id)}
+                        className="shrink-0 opacity-50 active:opacity-90"
+                        aria-label={`Eliminar ${ig.nombre}`}
+                      >
+                        <Trash2 size={15} className="text-slate-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Modal: nuevo ingreso extra */}
+        {modalNuevoIngreso && (
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center"
+            style={{ background: "rgba(15,23,42,0.35)" }}
+            onClick={() => setModalNuevoIngreso(false)}
+          >
+            <div className="w-full bg-white rounded-t-3xl p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">Nuevo ingreso</h3>
+                <button onClick={() => setModalNuevoIngreso(false)} className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center">
+                  <X size={16} className="text-slate-500" />
+                </button>
+              </div>
+
+              <label className="block text-sm text-slate-600 mb-2">Descripción</label>
+              <input
+                type="text"
+                value={formIngreso.nombre}
+                onChange={(e) => setFormIngreso({ ...formIngreso, nombre: e.target.value })}
+                placeholder="Ej: Alquiler que cobramos, Freelance..."
+                className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-4 outline-none"
+              />
+
+              <label className="block text-sm text-slate-600 mb-2">Monto mensual</label>
+              <input
+                type="number"
+                value={formIngreso.monto}
+                onChange={(e) => setFormIngreso({ ...formIngreso, monto: e.target.value })}
+                placeholder="0"
+                className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
+              />
+
+              <button
+                onClick={agregarIngresoExtra}
+                className="w-full rounded-2xl py-4 text-white font-semibold"
+                style={{ background: persona.color }}
+              >
+                Guardar
+              </button>
             </div>
           </div>
         )}
