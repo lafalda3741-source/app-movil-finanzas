@@ -9,5 +9,16 @@
   "icons": [
     { "src": "/icon.svg", "sizes": "192x192", "type": "image/svg+xml" },
     { "src": "/icon.svg", "sizes": "512x512", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Cargar pago",
+      "short_name": "Cargar pago",
+      "description": "Ir directo a cargar una compra o pago nuevo",
+      "url": "/?accion=carga",
+      "icons": [
+        { "src": "/icon-cargar.svg", "sizes": "192x192", "type": "image/svg+xml" }
+      ]
+    }
   ]
 }

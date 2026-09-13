@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   PiggyBank,
   CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 
 // ============================================================
@@ -84,9 +85,19 @@ export default function AppMovil() {
 
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [seccionActiva, setSeccionActiva] = useState("carga");
+
+  // Si se abrió desde el acceso directo "Cargar pago" (?accion=carga), asegura
+  // que arranque ahí, sin pasar por el menú.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("accion") === "carga") setSeccionActiva("carga");
+    }
+  }, []);
   const [mesIndex, setMesIndex] = useState(1); // Sep 2026, igual que el Panel de Control
 
   const [cargando, setCargando] = useState(true);
+  const [recargarKey, setRecargarKey] = useState(0); // tocar "Actualizar" fuerza releer todo
   const [cargosPorTarjeta, setCargosPorTarjeta] = useState({});
   const [saldosTarjetas, setSaldosTarjetas] = useState({}); // { [tarjetaId]: saldo } — viene de la tabla "tarjetas", mantenida por el trigger
   const [gastosMensuales, setGastosMensuales] = useState([]);
@@ -244,7 +255,7 @@ export default function AppMovil() {
       }
     };
     if (desbloqueado) cargarDatos();
-  }, [desbloqueado]);
+  }, [desbloqueado, seccionActiva, recargarKey]);
 
   // ---- Carga de Compras ----
   const [formCompra, setFormCompra] = useState({
@@ -302,6 +313,8 @@ export default function AppMovil() {
 
   // ---- Cuotas de Tarjetas: editar / eliminar cargo ----
   const eliminarCargo = async (tarjetaId, cargoId) => {
+    const cargo = (cargosPorTarjeta[tarjetaId] || []).find((c) => c.id === cargoId);
+    if (!window.confirm(`¿Seguro que querés eliminar "${cargo?.nombre || "este cargo"}"?`)) return;
     setCargosPorTarjeta((prev) => ({ ...prev, [tarjetaId]: prev[tarjetaId].filter((c) => c.id !== cargoId) }));
     const { error } = await supabase.from("cargos_tarjeta").delete().eq("id", cargoId);
     if (error) console.error("Error eliminando cargo:", error);
@@ -524,9 +537,18 @@ export default function AppMovil() {
             <ChevronRight size={16} />
           </button>
         </div>
-        <div className="flex items-center gap-1.5 px-4 pb-2.5 text-white/90 text-sm">
-          {seccionInfo && <seccionInfo.icon size={14} />}
-          {seccionInfo?.label}
+        <div className="flex items-center justify-between gap-1.5 px-4 pb-2.5 text-white/90 text-sm">
+          <div className="flex items-center gap-1.5">
+            {seccionInfo && <seccionInfo.icon size={14} />}
+            {seccionInfo?.label}
+          </div>
+          <button
+            onClick={() => setRecargarKey((k) => k + 1)}
+            className="flex items-center gap-1 text-xs text-white/75 active:text-white"
+            aria-label="Actualizar datos"
+          >
+            <RefreshCw size={13} className={cargando ? "animate-spin" : ""} /> Actualizar
+          </button>
         </div>
       </header>
 
@@ -801,10 +823,15 @@ export default function AppMovil() {
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-2">
                             <div className="h-full rounded-full" style={{ width: `${progresoPct}%`, background: t.color }} />
                           </div>
-                          <div className="flex items-center justify-between text-xs text-slate-500">
+                          <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                            <span className="flex items-center gap-1">
+                              <Calendar size={12} /> Desde: {mesEnOffset(mesInicioCargo)}
+                            </span>
                             <span className="flex items-center gap-1">
                               <Calendar size={12} /> Termina: {mesEnOffset(mesInicioCargo + cuotaTotal - 1)}
                             </span>
+                          </div>
+                          <div className="flex items-center justify-end text-xs text-slate-500">
                             <span>Total: {fmt(totalCargo)}</span>
                           </div>
                         </div>
