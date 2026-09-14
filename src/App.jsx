@@ -48,6 +48,15 @@ const TARJETAS = [
 const MESES = ["Ago 2026", "Sep 2026", "Oct 2026", "Nov 2026", "Dic 2026", "Ene 2027", "Feb 2027", "Mar 2027", "Abr 2027"];
 const MESES_ABREV = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
+// Mismo anclaje que la función SQL mes_actual_index() (Ago 2026 = índice 0).
+function mesActualIndex() {
+  const hoy = new Date();
+  return (hoy.getFullYear() - 2026) * 12 + (hoy.getMonth() - 7);
+}
+function proximoMesIndex() {
+  return Math.min(Math.max(mesActualIndex() + 1, 0), MESES.length - 1);
+}
+
 function mesEnOffset(offset) {
   const base = new Date(2026, 7, 1); // Ago 2026 = offset 0
   const d = new Date(base.getFullYear(), base.getMonth() + offset, 1);
@@ -82,6 +91,23 @@ export default function AppMovil() {
   const [desbloqueado, setDesbloqueado] = useState(false);
   const [pinIngresado, setPinIngresado] = useState("");
   const [pinError, setPinError] = useState(false);
+  const [pinReal, setPinReal] = useState(persona.pin); // fallback mientras carga
+  const [pinListo, setPinListo] = useState(false);
+
+  // Trae el PIN individual de esta persona desde Supabase (columna "pin" en
+  // "enlaces_apps"). Corre ANTES de desbloquear, así que va aparte del resto
+  // de la carga de datos (que solo corre después de desbloqueado).
+  useEffect(() => {
+    supabase
+      .from("enlaces_apps")
+      .select("pin")
+      .eq("persona", PERSONA_ACTUAL)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data?.pin) setPinReal(data.pin);
+        setPinListo(true);
+      });
+  }, []);
 
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [seccionActiva, setSeccionActiva] = useState("carga");
@@ -140,12 +166,13 @@ export default function AppMovil() {
 
   // ---- PIN ----
   const ingresarDigito = (d) => {
+    if (!pinListo) return; // evita comparar contra el fallback mientras carga el pin real
     if (pinError) setPinError(false);
     setPinIngresado((prev) => {
       if (prev.length >= 4) return prev;
       const nuevo = prev + d;
       if (nuevo.length === 4) {
-        if (nuevo === persona.pin) {
+        if (nuevo === pinReal) {
           setTimeout(() => setDesbloqueado(true), 120);
         } else {
           setTimeout(() => {
@@ -263,16 +290,17 @@ export default function AppMovil() {
     descripcion: "",
     importe: "",
     cuotas: "1",
-    mesInicio: 1,
+    mesInicio: proximoMesIndex(),
   });
 
-  // El mes de inicio del formulario sigue al mes seleccionado en la cabecera
-  // cada vez que entrás a "Carga de Compras" — pero seguís pudiendo cambiarlo a mano.
+  // El mes de inicio del formulario arranca en el mes siguiente al actual
+  // (mes vencido) cada vez que entrás a "Carga de Compras" — pero seguís
+  // pudiendo cambiarlo a mano.
   useEffect(() => {
     if (seccionActiva === "carga") {
-      setFormCompra((prev) => ({ ...prev, mesInicio: mesIndex }));
+      setFormCompra((prev) => ({ ...prev, mesInicio: proximoMesIndex() }));
     }
-  }, [seccionActiva, mesIndex]);
+  }, [seccionActiva]);
 
   const [compraGuardadaOk, setCompraGuardadaOk] = useState(false);
   const [erroGuardarCompra, setErrorGuardarCompra] = useState(false);
