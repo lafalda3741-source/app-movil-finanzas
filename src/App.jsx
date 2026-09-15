@@ -287,17 +287,20 @@ export default function AppMovil() {
   // ---- Carga de Compras ----
   const [formCompra, setFormCompra] = useState({
     tarjetaId: persona.tarjetasPropias[0],
+    tipo: "cuotas", // "cuotas" | "recurrente"
     descripcion: "",
     importe: "",
     cuotas: "1",
     mesInicio: proximoMesIndex(),
   });
+  const [cargoEnEdicion, setCargoEnEdicion] = useState(null); // { tarjetaId, cargoId } | null (null = alta nueva)
 
   // El mes de inicio del formulario arranca en el mes siguiente al actual
-  // (mes vencido) cada vez que entrás a "Carga de Compras" — pero seguís
-  // pudiendo cambiarlo a mano.
+  // (mes vencido) cada vez que entrás a "Carga de Compras" para dar de alta
+  // algo nuevo — pero seguís pudiendo cambiarlo a mano. Si entraste para
+  // EDITAR un cargo existente, no lo tocamos (ya viene precargado).
   useEffect(() => {
-    if (seccionActiva === "carga") {
+    if (seccionActiva === "carga" && !cargoEnEdicion) {
       setFormCompra((prev) => ({ ...prev, mesInicio: proximoMesIndex() }));
     }
   }, [seccionActiva]);
@@ -305,12 +308,79 @@ export default function AppMovil() {
   const [compraGuardadaOk, setCompraGuardadaOk] = useState(false);
   const [erroGuardarCompra, setErrorGuardarCompra] = useState(false);
 
+  const abrirEdicionCargo = (tarjetaId, cargo) => {
+    const esCuotas = cargo.cuotaTotal != null;
+    setCargoEnEdicion({ tarjetaId, cargoId: cargo.id });
+    setFormCompra({
+      tarjetaId,
+      tipo: esCuotas ? "cuotas" : "recurrente",
+      descripcion: cargo.nombre,
+      importe: String(esCuotas ? cargo.monto * cargo.cuotaTotal : cargo.monto),
+      cuotas: esCuotas ? String(cargo.cuotaTotal) : "1",
+      mesInicio: cargo.mesInicio || 0,
+    });
+    setSeccionActiva("carga");
+  };
+
+  const cancelarEdicionCarga = () => {
+    setCargoEnEdicion(null);
+    setFormCompra({
+      tarjetaId: persona.tarjetasPropias[0],
+      tipo: "cuotas",
+      descripcion: "",
+      importe: "",
+      cuotas: "1",
+      mesInicio: proximoMesIndex(),
+    });
+  };
+
   const guardarCompra = async () => {
     if (!formCompra.descripcion.trim() || !formCompra.importe) return;
-    const cuotaTotal = Number(formCompra.cuotas) || 1;
-    const montoPorCuota = Number(formCompra.importe) / cuotaTotal;
+    const esCuotas = formCompra.tipo === "cuotas";
+    const cuotaTotal = esCuotas ? Number(formCompra.cuotas) || 1 : null;
+    const montoPorMes = esCuotas ? Number(formCompra.importe) / cuotaTotal : Number(formCompra.importe);
     const mesInicio = Number(formCompra.mesInicio) || 0;
-    const nuevo = { id: `c${Date.now()}`, nombre: formCompra.descripcion.trim(), monto: montoPorCuota, cuotaTotal, mesInicio };
+
+    if (cargoEnEdicion) {
+      // ---- Editar un cargo ya cargado ----
+      const { tarjetaId: tarjetaOriginal, cargoId } = cargoEnEdicion;
+      const tarjetaDestino = formCompra.tarjetaId;
+      const actualizado = { id: cargoId, nombre: formCompra.descripcion.trim(), monto: montoPorMes, cuotaTotal, mesInicio };
+
+      setCargosPorTarjeta((prev) => {
+        const siguiente = { ...prev };
+        siguiente[tarjetaOriginal] = (siguiente[tarjetaOriginal] || []).filter((c) => c.id !== cargoId);
+        siguiente[tarjetaDestino] = [...(siguiente[tarjetaDestino] || []), actualizado];
+        return siguiente;
+      });
+
+      const { error } = await supabase
+        .from("cargos_tarjeta")
+        .update({
+          tarjeta_id: tarjetaDestino,
+          nombre: actualizado.nombre,
+          monto: actualizado.monto,
+          cuota_total: actualizado.cuotaTotal,
+          mes_inicio: mesInicio,
+        })
+        .eq("id", cargoId);
+
+      if (error) {
+        console.error("Error editando cargo:", error);
+        setErrorGuardarCompra(true);
+        setTimeout(() => setErrorGuardarCompra(false), 2600);
+        return;
+      }
+
+      setCargoEnEdicion(null);
+      setFormCompra({ tarjetaId: persona.tarjetasPropias[0], tipo: "cuotas", descripcion: "", importe: "", cuotas: "1", mesInicio: proximoMesIndex() });
+      setCompraGuardadaOk(true);
+      setTimeout(() => setCompraGuardadaOk(false), 2200);
+      return;
+    }
+
+    // ---- Compra nueva ----
+    const nuevo = { id: `c${Date.now()}`, nombre: formCompra.descripcion.trim(), monto: montoPorMes, cuotaTotal, mesInicio };
 
     setCargosPorTarjeta((prev) => ({
       ...prev,
@@ -334,28 +404,18 @@ export default function AppMovil() {
       return;
     }
 
-    setFormCompra({ tarjetaId: formCompra.tarjetaId, descripcion: "", importe: "", cuotas: "1", mesInicio });
+    setFormCompra({ ...formCompra, descripcion: "", importe: "", cuotas: "1" });
     setCompraGuardadaOk(true);
     setTimeout(() => setCompraGuardadaOk(false), 2200);
   };
 
-  // ---- Cuotas de Tarjetas: editar / eliminar cargo ----
+  // ---- Cuotas de Tarjetas: eliminar cargo ----
   const eliminarCargo = async (tarjetaId, cargoId) => {
     const cargo = (cargosPorTarjeta[tarjetaId] || []).find((c) => c.id === cargoId);
     if (!window.confirm(`¿Seguro que querés eliminar "${cargo?.nombre || "este cargo"}"?`)) return;
     setCargosPorTarjeta((prev) => ({ ...prev, [tarjetaId]: prev[tarjetaId].filter((c) => c.id !== cargoId) }));
     const { error } = await supabase.from("cargos_tarjeta").delete().eq("id", cargoId);
     if (error) console.error("Error eliminando cargo:", error);
-  };
-
-  const [editandoCargo, setEditandoCargo] = useState(null); // "tarjetaId:cargoId"
-  const actualizarNombreCargo = async (tarjetaId, cargoId, nombre) => {
-    setCargosPorTarjeta((prev) => ({
-      ...prev,
-      [tarjetaId]: prev[tarjetaId].map((c) => (c.id === cargoId ? { ...c, nombre } : c)),
-    }));
-    const { error } = await supabase.from("cargos_tarjeta").update({ nombre }).eq("id", cargoId);
-    if (error) console.error("Error actualizando cargo:", error);
   };
 
   // ---- Gastos Mensuales: marcar pagado ----
@@ -644,17 +704,27 @@ export default function AppMovil() {
 
         {!cargando && seccionActiva === "carga" && (
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-4">Carga Rápida de Compras</h1>
+            <h1 className="text-2xl font-bold text-slate-900 mb-4">
+              {cargoEnEdicion ? "Editar Cargo" : "Carga Rápida de Compras"}
+            </h1>
+            {cargoEnEdicion && (
+              <div
+                className="flex items-center justify-between rounded-2xl px-4 py-3 mb-4 text-sm font-medium"
+                style={{ background: "#EDE9FE", color: "#7C3AED" }}
+              >
+                Editando un cargo ya cargado
+                <button onClick={cancelarEdicionCarga} className="underline">Cancelar</button>
+              </div>
+            )}
             <div className="bg-white rounded-3xl p-5">
               <label className="block text-sm text-slate-600 mb-2">Tarjeta</label>
               <div className="grid grid-cols-2 gap-2 mb-5">
-                {persona.tarjetasPropias.map((tid) => {
-                  const t = TARJETAS.find((x) => x.id === tid);
-                  const activa = formCompra.tarjetaId === tid;
+                {(cargoEnEdicion ? TARJETAS : TARJETAS.filter((t) => persona.tarjetasPropias.includes(t.id))).map((t) => {
+                  const activa = formCompra.tarjetaId === t.id;
                   return (
                     <button
-                      key={tid}
-                      onClick={() => setFormCompra({ ...formCompra, tarjetaId: tid })}
+                      key={t.id}
+                      onClick={() => setFormCompra({ ...formCompra, tarjetaId: t.id })}
                       className="rounded-2xl py-3 text-sm font-semibold border-2 transition-colors"
                       style={activa ? { borderColor: "#0D9488", background: "#ECFDF5", color: "#0D9488" } : { borderColor: "#E2E8F0", color: "#334155" }}
                     >
@@ -662,6 +732,24 @@ export default function AppMovil() {
                     </button>
                   );
                 })}
+              </div>
+
+              <label className="block text-sm text-slate-600 mb-2">Tipo de cargo</label>
+              <div className="grid grid-cols-2 gap-2 mb-5">
+                <button
+                  onClick={() => setFormCompra({ ...formCompra, tipo: "cuotas" })}
+                  className="rounded-2xl py-3 text-sm font-semibold border-2 transition-colors"
+                  style={formCompra.tipo === "cuotas" ? { borderColor: "#0D9488", background: "#ECFDF5", color: "#0D9488" } : { borderColor: "#E2E8F0", color: "#334155" }}
+                >
+                  Cuotas
+                </button>
+                <button
+                  onClick={() => setFormCompra({ ...formCompra, tipo: "recurrente" })}
+                  className="rounded-2xl py-3 text-sm font-semibold border-2 transition-colors"
+                  style={formCompra.tipo === "recurrente" ? { borderColor: "#0D9488", background: "#ECFDF5", color: "#0D9488" } : { borderColor: "#E2E8F0", color: "#334155" }}
+                >
+                  Recurrente
+                </button>
               </div>
 
               <label className="block text-sm text-slate-600 mb-2">Detalle / Comercio</label>
@@ -684,7 +772,9 @@ export default function AppMovil() {
                 ))}
               </select>
 
-              <label className="block text-sm text-slate-600 mb-2">Importe Total</label>
+              <label className="block text-sm text-slate-600 mb-2">
+                {formCompra.tipo === "cuotas" ? "Importe Total" : "Monto mensual"}
+              </label>
               <input
                 type="number"
                 value={formCompra.importe}
@@ -693,14 +783,18 @@ export default function AppMovil() {
                 className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
               />
 
-              <label className="block text-sm text-slate-600 mb-2">Cantidad de Cuotas</label>
-              <input
-                type="number"
-                min={1}
-                value={formCompra.cuotas}
-                onChange={(e) => setFormCompra({ ...formCompra, cuotas: e.target.value })}
-                className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
-              />
+              {formCompra.tipo === "cuotas" && (
+                <>
+                  <label className="block text-sm text-slate-600 mb-2">Cantidad de Cuotas</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={formCompra.cuotas}
+                    onChange={(e) => setFormCompra({ ...formCompra, cuotas: e.target.value })}
+                    className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
+                  />
+                </>
+              )}
 
               {compraGuardadaOk && (
                 <div
@@ -708,7 +802,7 @@ export default function AppMovil() {
                   style={{ background: "#DCFCE7", color: "#16A34A" }}
                 >
                   <CheckCircle2 size={18} />
-                  ¡Gasto cargado con éxito!
+                  {cargoEnEdicion ? "¡Cambios guardados!" : "¡Gasto cargado con éxito!"}
                 </div>
               )}
               {erroGuardarCompra && (
@@ -728,6 +822,10 @@ export default function AppMovil() {
                 {compraGuardadaOk ? (
                   <>
                     <CheckCircle2 size={18} /> ¡Guardado!
+                  </>
+                ) : cargoEnEdicion ? (
+                  <>
+                    <Pencil size={18} /> Guardar Cambios
                   </>
                 ) : (
                   <>
@@ -811,23 +909,10 @@ export default function AppMovil() {
                       return (
                         <div key={c.id} className="px-5 py-4 border-b border-slate-100 last:border-0">
                           <div className="flex items-center justify-between mb-1.5">
-                            {editandoCargo === c.id ? (
-                              <input
-                                autoFocus
-                                type="text"
-                                value={c.nombre}
-                                onChange={(e) => actualizarNombreCargo(t.id, c.id, e.target.value)}
-                                onBlur={() => setEditandoCargo(null)}
-                                onKeyDown={(e) => e.key === "Enter" && setEditandoCargo(null)}
-                                className="text-base font-semibold border-b-2 outline-none flex-1 mr-2"
-                                style={{ borderColor: t.color }}
-                              />
-                            ) : (
-                              <span className="text-base font-semibold text-slate-900">{c.nombre}</span>
-                            )}
+                            <span className="text-base font-semibold text-slate-900">{c.nombre}</span>
                             <div className="flex gap-2 shrink-0">
                               <button
-                                onClick={() => setEditandoCargo(c.id)}
+                                onClick={() => abrirEdicionCargo(t.id, c)}
                                 className="h-8 w-8 rounded-xl flex items-center justify-center"
                                 style={{ background: "#EDE9FE", color: "#7C3AED" }}
                                 aria-label="Editar"
@@ -1138,3 +1223,4 @@ export default function AppMovil() {
     </div>
   );
 }
+
