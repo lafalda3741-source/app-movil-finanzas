@@ -45,7 +45,37 @@ const TARJETAS = [
   { id: "cabal-cielo", nombre: "Cabal Cielo", color: "#F97316" },
 ];
 
-const MESES = ["Ago 2026", "Sep 2026", "Oct 2026", "Nov 2026", "Dic 2026", "Ene 2027", "Feb 2027", "Mar 2027", "Abr 2027"];
+// Meses sin tope: el índice 0 es Ago 2026 y los siguientes se calculan solos (no hay lista fija).
+function nombreMes(i) {
+  const d = new Date(2026, 7 + i, 1);
+  return `${MESES_ABREV[d.getMonth()]} ${d.getFullYear()}`;
+}
+function indicesMeses(desde, cant) {
+  return Array.from({ length: cant }, (_, k) => desde + k).map((i) => ({ i, m: nombreMes(i) }));
+}
+// Sueldos por mes: para meses que todavía no tienen valor cargado se repite el último conocido.
+function montoDelMes(arr, i) {
+  if (!arr || arr.length === 0) return 0;
+  return i < arr.length ? arr[i] : arr[arr.length - 1];
+}
+// Cambia solo el monto de un mes (el resto queda como estaba).
+function conMontoEnMes(arr, i, valor) {
+  const nuevos = [...arr];
+  const previo = montoDelMes(arr, i);
+  const ultimo = nuevos.length ? nuevos[nuevos.length - 1] : 0;
+  while (nuevos.length <= i) nuevos.push(ultimo);
+  nuevos[i] = valor;
+  if (nuevos.length === i + 1) nuevos.push(previo);
+  return nuevos;
+}
+// Cambia el monto desde un mes en adelante (para los aumentos).
+function conMontoDesdeMes(arr, i, valor) {
+  const nuevos = [...arr];
+  const ultimo = nuevos.length ? nuevos[nuevos.length - 1] : 0;
+  while (nuevos.length <= i) nuevos.push(ultimo);
+  for (let k = i; k < nuevos.length; k++) nuevos[k] = valor;
+  return nuevos;
+}
 const MESES_ABREV = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
 // Mismo anclaje que la función SQL mes_actual_index() (Ago 2026 = índice 0).
@@ -53,8 +83,11 @@ function mesActualIndex() {
   const hoy = new Date();
   return (hoy.getFullYear() - 2026) * 12 + (hoy.getMonth() - 7);
 }
+function mesActualClamp() {
+  return Math.max(mesActualIndex(), 0);
+}
 function proximoMesIndex() {
-  return Math.min(Math.max(mesActualIndex() + 1, 0), MESES.length - 1);
+  return Math.max(mesActualIndex() + 1, 0);
 }
 
 function mesEnOffset(offset) {
@@ -120,7 +153,11 @@ export default function AppMovil() {
       if (params.get("accion") === "carga") setSeccionActiva("carga");
     }
   }, []);
-  const [mesIndex, setMesIndex] = useState(1); // Sep 2026, igual que el Panel de Control
+  const [mesIndex, setMesIndex] = useState(mesActualClamp()); // arranca en el mes actual del sistema
+  // Columnas de tablas/gráficos: ventana móvil que acompaña al mes elegido.
+  const mesesVista = indicesMeses(Math.max(0, mesIndex - 1), 5);
+  // Opciones de "Mes de inicio": desde Ago 2026 hasta 5 años adelante de hoy (se corre solo).
+  const opcionesMes = indicesMeses(0, Math.max(mesActualIndex() + 61, mesIndex + 13));
 
   const [cargando, setCargando] = useState(true);
   const [recargarKey, setRecargarKey] = useState(0); // tocar "Actualizar" fuerza releer todo
@@ -129,8 +166,8 @@ export default function AppMovil() {
   const [gastosMensuales, setGastosMensuales] = useState([]);
   const [categorias, setCategorias] = useState([]);
   const [sueldos, setSueldos] = useState({
-    ariel: { titular: "Ariel", montosPorMes: Array(MESES.length).fill(0), aumentosPorMes: {} },
-    cielo: { titular: "Cielo", montosPorMes: Array(MESES.length).fill(0), aumentosPorMes: {} },
+    ariel: { titular: "Ariel", montosPorMes: Array(12).fill(0), aumentosPorMes: {} },
+    cielo: { titular: "Cielo", montosPorMes: Array(12).fill(0), aumentosPorMes: {} },
   });
   const [aumentoPorcPorPersona, setAumentoPorcPorPersona] = useState({ ariel: "", cielo: "" });
   const [editandoSueldo, setEditandoSueldo] = useState(null); // "ariel" | "cielo" | null
@@ -246,8 +283,8 @@ export default function AppMovil() {
 
         const { data: sueldosDb } = await supabase.from("sueldos").select("*");
         const nuevosSueldos = {
-          ariel: { titular: "Ariel", montosPorMes: Array(MESES.length).fill(0), aumentosPorMes: {} },
-          cielo: { titular: "Cielo", montosPorMes: Array(MESES.length).fill(0), aumentosPorMes: {} },
+          ariel: { titular: "Ariel", montosPorMes: Array(12).fill(0), aumentosPorMes: {} },
+          cielo: { titular: "Cielo", montosPorMes: Array(12).fill(0), aumentosPorMes: {} },
         };
         const faltantes = [];
         for (const key of ["ariel", "cielo"]) {
@@ -255,7 +292,7 @@ export default function AppMovil() {
           if (fila) {
             nuevosSueldos[key] = {
               titular: fila.titular,
-              montosPorMes: fila.montos_por_mes && fila.montos_por_mes.length ? fila.montos_por_mes : Array(MESES.length).fill(0),
+              montosPorMes: fila.montos_por_mes && fila.montos_por_mes.length ? fila.montos_por_mes : Array(12).fill(0),
               aumentosPorMes: fila.aumentos_por_mes || {},
             };
           } else {
@@ -433,8 +470,7 @@ export default function AppMovil() {
 
   // ---- Ingresos: sueldos de Ariel y Cielo (los dos, ambas apps ven y editan los dos) ----
   const actualizarMontoSueldo = async (key, valor) => {
-    const nuevosMontos = [...sueldos[key].montosPorMes];
-    nuevosMontos[mesIndex] = valor;
+    const nuevosMontos = conMontoEnMes(sueldos[key].montosPorMes, mesIndex, valor);
     setSueldos((prev) => ({ ...prev, [key]: { ...prev[key], montosPorMes: nuevosMontos } }));
     const { error } = await supabase.from("sueldos").update({ montos_por_mes: nuevosMontos }).eq("persona", key);
     if (error) console.error("Error actualizando sueldo:", error);
@@ -444,10 +480,9 @@ export default function AppMovil() {
     const porc = Number(aumentoPorcPorPersona[key]);
     if (!porc) return;
     const s = sueldos[key];
-    const anterior = s.montosPorMes[mesIndex];
+    const anterior = montoDelMes(s.montosPorMes, mesIndex);
     const nuevo = Math.round(anterior * (1 + porc / 100));
-    const nuevosMontos = [...s.montosPorMes];
-    for (let i = mesIndex; i < nuevosMontos.length; i++) nuevosMontos[i] = nuevo;
+    const nuevosMontos = conMontoDesdeMes(s.montosPorMes, mesIndex, nuevo);
     const nuevosAumentos = { ...s.aumentosPorMes, [mesIndex]: { porc, anterior, nuevo } };
     setSueldos((prev) => ({ ...prev, [key]: { ...prev[key], montosPorMes: nuevosMontos, aumentosPorMes: nuevosAumentos } }));
     setAumentoPorcPorPersona((prev) => ({ ...prev, [key]: "" }));
@@ -613,10 +648,9 @@ export default function AppMovil() {
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="bg-white/15 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap shrink-0">{MESES[mesIndex]}</span>
+          <span className="bg-white/15 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap shrink-0">{nombreMes(mesIndex)}</span>
           <button
-            onClick={() => setMesIndex((i) => Math.min(MESES.length - 1, i + 1))}
-            disabled={mesIndex === MESES.length - 1}
+            onClick={() => setMesIndex((i) => i + 1)}
             className="h-9 w-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 disabled:opacity-40"
           >
             <ChevronRight size={16} />
@@ -644,11 +678,11 @@ export default function AppMovil() {
         {!cargando && seccionActiva === "dashboard" && (
           <div>
             <h1 className="text-2xl font-bold text-slate-900 mb-1">Dashboard</h1>
-            <p className="text-sm text-slate-500 mb-4">Resumen de {MESES[mesIndex]}</p>
+            <p className="text-sm text-slate-500 mb-4">Resumen de {nombreMes(mesIndex)}</p>
 
             {(() => {
-              const ingresoArielMes = sueldos.ariel.montosPorMes[mesIndex] || 0;
-              const ingresoCieloMes = sueldos.cielo.montosPorMes[mesIndex] || 0;
+              const ingresoArielMes = montoDelMes(sueldos.ariel.montosPorMes, mesIndex) || 0;
+              const ingresoCieloMes = montoDelMes(sueldos.cielo.montosPorMes, mesIndex) || 0;
               const totalIngresosExtra = ingresosExtra.reduce((acc, ig) => acc + ig.monto, 0);
               const ingresosMes = ingresoArielMes + ingresoCieloMes + totalIngresosExtra;
 
@@ -764,7 +798,7 @@ export default function AppMovil() {
                 onChange={(e) => setFormCompra({ ...formCompra, mesInicio: Number(e.target.value) })}
                 className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-5 outline-none"
               >
-                {MESES.map((m, i) => (
+                {opcionesMes.map(({ m, i }) => (
                   <option key={m} value={i}>{m}</option>
                 ))}
               </select>
@@ -847,7 +881,7 @@ export default function AppMovil() {
                       <th className="sticky left-0 bg-white z-10 text-left px-4 py-3 font-medium text-slate-500 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                         Tarjeta
                       </th>
-                      {MESES.slice(0, 5).map((m, i) => (
+                      {mesesVista.map(({ m, i }) => (
                         <th key={m} className="px-4 py-3 font-medium whitespace-nowrap" style={i === mesIndex ? { color: "#0D9488", background: "#ECFDF5" } : { color: "#94A3B8" }}>
                           {m.split(" ")[0]}<br />{m.split(" ")[1]}
                         </th>
@@ -861,7 +895,7 @@ export default function AppMovil() {
                           <span className="inline-block h-2.5 w-2.5 rounded-full mr-2" style={{ background: t.color }} />
                           <span className="font-semibold text-slate-800">{t.nombre}</span>
                         </td>
-                        {MESES.slice(0, 5).map((m, i) => {
+                        {mesesVista.map(({ m, i }) => {
                           const total = (cargosPorTarjeta[t.id] || []).reduce((acc, c) => acc + (valorCargoEnMes(c, i) || 0), 0);
                           return (
                             <td key={m} className="px-4 py-3 text-right font-semibold whitespace-nowrap" style={i === mesIndex ? { background: "#ECFDF5", color: "#0D9488" } : { color: "#1E293B" }}>
@@ -966,7 +1000,7 @@ export default function AppMovil() {
                   <p className="text-sm text-slate-500 mb-1">Total general</p>
                   <p className="text-3xl font-bold text-slate-900 mb-3">{fmt(totalGeneral)}</p>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-500">Tarjetas ({MESES[mesIndex]})</span>
+                    <span className="text-slate-500">Tarjetas ({nombreMes(mesIndex)})</span>
                     <span className="font-semibold text-slate-700">{fmt(sumaTarjetasDelMes)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm mt-1">
@@ -1031,7 +1065,7 @@ export default function AppMovil() {
                 <Plus size={14} /> Agregar ingreso
               </button>
             </div>
-            <p className="text-sm text-slate-500 mb-4">Sueldos de {MESES[mesIndex]}</p>
+            <p className="text-sm text-slate-500 mb-4">Sueldos de {nombreMes(mesIndex)}</p>
 
             <div className="space-y-4 mb-5">
               {Object.entries(sueldos).map(([key, s]) => {
@@ -1053,7 +1087,7 @@ export default function AppMovil() {
                       <input
                         autoFocus
                         type="number"
-                        defaultValue={s.montosPorMes[mesIndex]}
+                        defaultValue={montoDelMes(s.montosPorMes, mesIndex)}
                         onBlur={(e) => {
                           const n = Number(e.target.value);
                           if (!isNaN(n) && n >= 0) actualizarMontoSueldo(key, n);
@@ -1065,11 +1099,11 @@ export default function AppMovil() {
                       />
                     ) : (
                       <p onClick={() => setEditandoSueldo(key)} className="text-2xl font-bold text-slate-900 mb-5">
-                        {fmt(s.montosPorMes[mesIndex])}
+                        {fmt(montoDelMes(s.montosPorMes, mesIndex))}
                       </p>
                     )}
 
-                    <label className="block text-sm text-slate-600 mb-2">% de aumento desde {MESES[mesIndex]}</label>
+                    <label className="block text-sm text-slate-600 mb-2">% de aumento desde {nombreMes(mesIndex)}</label>
                     <div className="flex gap-2 mb-4">
                       <input
                         type="number"
