@@ -420,18 +420,15 @@ export default function AppMovil() {
 
   // ---- Gastos Mensuales: marcar pagado ----
   const togglePagado = async (id) => {
-    let nuevoValor;
-    setGastosMensuales((prev) =>
-      prev.map((g) => {
-        if (g.id === id) {
-          nuevoValor = !g.pagado;
-          return { ...g, pagado: nuevoValor };
-        }
-        return g;
-      })
-    );
+    const actual = gastosMensuales.find((g) => g.id === id);
+    if (!actual) return;
+    const nuevoValor = !actual.pagado;
+    setGastosMensuales((prev) => prev.map((g) => (g.id === id ? { ...g, pagado: nuevoValor } : g)));
     const { error } = await supabase.from("gastos_mensuales").update({ pagado: nuevoValor }).eq("id", id);
-    if (error) console.error("Error actualizando pagado:", error);
+    if (error) {
+      console.error("Error actualizando pagado:", error);
+      setGastosMensuales((prev) => prev.map((g) => (g.id === id ? { ...g, pagado: !nuevoValor } : g)));
+    }
   };
 
   // ---- Ingresos: sueldos de Ariel y Cielo (los dos, ambas apps ven y editan los dos) ----
