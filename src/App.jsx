@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import {
   Home,
@@ -163,7 +163,13 @@ export default function AppMovil() {
   const [recargarKey, setRecargarKey] = useState(0); // tocar "Actualizar" fuerza releer todo
   const [cargosPorTarjeta, setCargosPorTarjeta] = useState({});
   const [saldosTarjetas, setSaldosTarjetas] = useState({}); // { [tarjetaId]: saldo } — viene de la tabla "tarjetas", mantenida por el trigger
-  const [gastosMensuales, setGastosMensuales] = useState([]);
+  const [gastosBase, setGastosMensuales] = useState([]);
+  // "Pagado" es por mes: viene de la tabla pagos_mensuales (gasto_id + mes_index), no del gasto en sí.
+  const [pagosPorMes, setPagosPorMes] = useState({}); // { "gastoId:mesIndex": true/false }
+  const gastosMensuales = useMemo(
+    () => gastosBase.map((g) => ({ ...g, pagado: !!pagosPorMes[`${g.id}:${mesIndex}`] })),
+    [gastosBase, pagosPorMes, mesIndex]
+  );
   const [categorias, setCategorias] = useState([]);
   const [sueldos, setSueldos] = useState({
     ariel: { titular: "Ariel", montosPorMes: Array(12).fill(0), aumentosPorMes: {} },
@@ -248,6 +254,11 @@ export default function AppMovil() {
           agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total, mesInicio: Number.isFinite(Number(c.mes_inicio)) ? Number(c.mes_inicio) : 0 });
         });
         setCargosPorTarjeta(agrupados);
+
+        const { data: pagosDb } = await supabase.from("pagos_mensuales").select("gasto_id, mes_index, pagado");
+        const mapaPagos = {};
+        (pagosDb || []).forEach((p) => { mapaPagos[`${p.gasto_id}:${p.mes_index}`] = !!p.pagado; });
+        setPagosPorMes(mapaPagos);
 
         const { data: gastosDb } = await supabase.from("gastos_mensuales").select("*");
         let listaGastos = gastosDb || [];
@@ -457,14 +468,16 @@ export default function AppMovil() {
 
   // ---- Gastos Mensuales: marcar pagado ----
   const togglePagado = async (id) => {
-    const actual = gastosMensuales.find((g) => g.id === id);
-    if (!actual) return;
-    const nuevoValor = !actual.pagado;
-    setGastosMensuales((prev) => prev.map((g) => (g.id === id ? { ...g, pagado: nuevoValor } : g)));
-    const { error } = await supabase.from("gastos_mensuales").update({ pagado: nuevoValor }).eq("id", id);
+    const clave = `${id}:${mesIndex}`;
+    const nuevoValor = !pagosPorMes[clave];
+    setPagosPorMes((prev) => ({ ...prev, [clave]: nuevoValor }));
+    const { error } = await supabase
+      .from("pagos_mensuales")
+      .upsert({ gasto_id: id, mes_index: mesIndex, pagado: nuevoValor, updated_at: new Date().toISOString() }, { onConflict: "gasto_id,mes_index" });
     if (error) {
       console.error("Error actualizando pagado:", error);
-      setGastosMensuales((prev) => prev.map((g) => (g.id === id ? { ...g, pagado: !nuevoValor } : g)));
+      // si falla, revertimos para no mostrar algo que no quedó guardado
+      setPagosPorMes((prev) => ({ ...prev, [clave]: !nuevoValor }));
     }
   };
 
@@ -633,7 +646,7 @@ export default function AppMovil() {
 
       {/* Header */}
       <header className="text-white sticky top-0 z-30" style={{ background: "#0D9488" }}>
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex items-center gap-3 px-4 pt-3">
           <button onClick={() => setMenuAbierto(true)} className="h-10 w-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
             <Menu size={18} />
           </button>
@@ -641,19 +654,24 @@ export default function AppMovil() {
             <p className="font-bold truncate leading-tight">Finanzas Familiar</p>
             <p className="text-white/75 text-xs">{persona.nombre}</p>
           </div>
+        </div>
+        {/* Selector de mes grande, en su propia fila */}
+        <div className="flex items-center gap-3 px-4 py-3">
           <button
             onClick={() => setMesIndex((i) => Math.max(0, i - 1))}
             disabled={mesIndex === 0}
-            className="h-9 w-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 disabled:opacity-40"
+            className="h-12 w-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 active:bg-white/30 disabled:opacity-40"
+            aria-label="Mes anterior"
           >
-            <ChevronLeft size={16} />
+            <ChevronLeft size={24} />
           </button>
-          <span className="bg-white/15 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap shrink-0">{nombreMes(mesIndex)}</span>
+          <span className="flex-1 bg-white/20 rounded-2xl py-3 text-center text-xl font-bold whitespace-nowrap">{nombreMes(mesIndex)}</span>
           <button
             onClick={() => setMesIndex((i) => i + 1)}
-            className="h-9 w-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 disabled:opacity-40"
+            className="h-12 w-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 active:bg-white/30"
+            aria-label="Mes siguiente"
           >
-            <ChevronRight size={16} />
+            <ChevronRight size={24} />
           </button>
         </div>
         <div className="flex items-center justify-between gap-1.5 px-4 pb-2.5 text-white/90 text-sm">
@@ -981,6 +999,32 @@ export default function AppMovil() {
                         </div>
                       );
                     })}
+                    {(() => {
+                      // Cargos que todavía no empezaron a cobrarse: no suman en este mes, pero se ven acá para no "perderlos".
+                      const proximos = todosLosCargos.filter((c) => (c.mesInicio || 0) > mesIndex);
+                      if (proximos.length === 0) return null;
+                      return (
+                        <div className="bg-slate-50 px-5 py-3 border-t border-slate-100">
+                          <p className="text-xs font-semibold text-slate-500 mb-2">Se cobran en los meses siguientes</p>
+                          {proximos.map((c) => (
+                            <div key={c.id} className="flex items-center justify-between gap-2 py-1.5">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 truncate">{c.nombre}</p>
+                                <p className="text-xs text-slate-500">Desde {mesEnOffset(c.mesInicio || 0)} · {fmt(c.monto)}{c.cuotaTotal ? ` · ${c.cuotaTotal} cuota${c.cuotaTotal > 1 ? "s" : ""}` : "/mes"}</p>
+                              </div>
+                              <div className="flex gap-2 shrink-0">
+                                <button onClick={() => abrirEdicionCargo(t.id, c)} className="h-8 w-8 rounded-xl flex items-center justify-center" style={{ background: "#EDE9FE", color: "#7C3AED" }} aria-label="Editar">
+                                  <Pencil size={14} />
+                                </button>
+                                <button onClick={() => eliminarCargo(t.id, c.id)} className="h-8 w-8 rounded-xl flex items-center justify-center" style={{ background: "#FEE2E2", color: "#EF4444" }} aria-label="Eliminar">
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               );
