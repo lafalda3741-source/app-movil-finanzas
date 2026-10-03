@@ -513,7 +513,9 @@ export default function AppMovil() {
     if (!el) return;
     const ths = el.querySelectorAll("thead th");
     const stickyTh = ths[0];
-    const targetTh = ths[mesIndex + 1];
+    // La tabla muestra una ventana de meses que arranca un mes antes del elegido,
+      // así que el mes elegido es la columna 1 (o 0 si es el primer mes) + la columna fija.
+      const targetTh = ths[mesIndex - Math.max(0, mesIndex - 1) + 1];
     if (stickyTh && targetTh) {
       el.scrollTo({ left: targetTh.offsetLeft - stickyTh.getBoundingClientRect().width, behavior: "smooth" });
     }
