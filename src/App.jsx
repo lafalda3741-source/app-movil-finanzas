@@ -32,18 +32,44 @@ import {
 const PERSONA_ACTUAL = (typeof import.meta !== "undefined" && import.meta.env?.VITE_PERSONA) || "ariel";
 
 const PERSONAS = {
-  ariel: { nombre: "Ariel", pin: "1234", color: "#2563EB", tarjetasPropias: ["visa-ariel", "cabal-ariel"] },
-  cielo: { nombre: "Cielo", pin: "1234", color: "#8B5CF6", tarjetasPropias: ["visa-cielo", "cabal-cielo"] },
+  ariel: { nombre: "Ariel", pin: "1234", color: "#2563EB" },
+  cielo: { nombre: "Cielo", pin: "1234", color: "#8B5CF6" },
 };
 const persona = PERSONAS[PERSONA_ACTUAL] || PERSONAS.ariel;
+const personaKey = PERSONAS[PERSONA_ACTUAL] ? PERSONA_ACTUAL : "ariel";
 
-// Mismas 4 tarjetas y mismos ids que el Panel de Control (tabla cargos_tarjeta compartida)
-const TARJETAS = [
-  { id: "visa-ariel", nombre: "Visa Ariel", color: "#2563EB" },
-  { id: "visa-cielo", nombre: "Visa Cielo", color: "#8B5CF6" },
-  { id: "cabal-ariel", nombre: "Cabal Ariel", color: "#10B981" },
-  { id: "cabal-cielo", nombre: "Cabal Cielo", color: "#F97316" },
+// Logos de los bancos (los mismos del Panel de Control).
+const LOGOS_BANCO = {
+  "Banco Hipotecario": "data:image/png;base64,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",
+  "Banco Credicoop": "data:image/png;base64,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",
+};
+// Logo de la tarjeta: la imagen propia que se cargó en el panel o, si no tiene, la del banco (Hipotecario / Credicoop).
+function logoDeTarjeta(t) {
+  if (t.logo) return t.logo;
+  const b = (t.banco || "").toLowerCase();
+  if (b.includes("hipotecario")) return LOGOS_BANCO["Banco Hipotecario"];
+  if (b.includes("credicoop")) return LOGOS_BANCO["Banco Credicoop"];
+  return null;
+}
+
+// Tarjetas de arranque (por si todavía no cargó la base). Las reales se leen de la tabla "tarjetas",
+// que se administra desde Configuración en el Panel de Control. "titular" dice en qué app se pueden cargar consumos.
+const TARJETAS_INICIALES = [
+  { id: "visa-ariel", nombre: "VISA ARIEL", banco: "Banco Hipotecario", titular: "ariel", color: "#F08018" },
+  { id: "visa-cielo", nombre: "VISA CIELO", banco: "Banco Hipotecario", titular: "cielo", color: "#F08018" },
+  { id: "cabal-ariel", nombre: "CABAL ARIEL", banco: "Banco Credicoop", titular: "ariel", color: "#585048" },
+  { id: "cabal-cielo", nombre: "CABAL CIELO", banco: "Banco Credicoop", titular: "cielo", color: "#585048" },
 ];
+function tarjetaDesdeDb(r) {
+  return {
+    id: r.id,
+    nombre: r.nombre || r.id,
+    banco: r.banco || "",
+    logo: r.logo || "",
+    titular: r.titular === "cielo" ? "cielo" : "ariel",
+    color: /^#[0-9a-f]{6}$/i.test(r.color || "") ? r.color : "#0F766E",
+  };
+}
 
 // Meses sin tope: el índice 0 es Ago 2026 y los siguientes se calculan solos (no hay lista fija).
 function nombreMes(i) {
@@ -121,6 +147,9 @@ const SECCIONES = [
 ];
 
 export default function AppMovil() {
+  const [tarjetas, setTarjetas] = useState(TARJETAS_INICIALES);
+  // Tarjetas de esta persona: son las únicas donde puede cargar consumos nuevos.
+  const idsPropias = tarjetas.filter((t) => t.titular === personaKey).map((t) => t.id);
   const [desbloqueado, setDesbloqueado] = useState(false);
   const [pinIngresado, setPinIngresado] = useState("");
   const [pinError, setPinError] = useState(false);
@@ -236,11 +265,17 @@ export default function AppMovil() {
   useEffect(() => {
     const cargarDatos = async () => {
       try {
-        const { data: tarjetasDb } = await supabase.from("tarjetas").select("id, saldo");
+        const { data: tarjetasDb } = await supabase.from("tarjetas").select("*").order("orden");
+        let listaTarjetas = TARJETAS_INICIALES;
         if (tarjetasDb && tarjetasDb.length > 0) {
           const saldos = {};
           tarjetasDb.forEach((t) => (saldos[t.id] = Number(t.saldo) || 0));
           setSaldosTarjetas(saldos);
+          const desdeDb = tarjetasDb.filter((r) => r.nombre).map(tarjetaDesdeDb);
+          if (desdeDb.length > 0) {
+            listaTarjetas = desdeDb;
+            setTarjetas(desdeDb);
+          }
         }
 
         const { data: cats } = await supabase.from("categorias_gasto").select("*");
@@ -248,7 +283,7 @@ export default function AppMovil() {
 
         const { data: cargosDb } = await supabase.from("cargos_tarjeta").select("*").order("orden");
         const agrupados = {};
-        TARJETAS.forEach((t) => (agrupados[t.id] = []));
+        listaTarjetas.forEach((t) => (agrupados[t.id] = []));
         (cargosDb || []).forEach((c) => {
           if (!agrupados[c.tarjeta_id]) agrupados[c.tarjeta_id] = [];
           agrupados[c.tarjeta_id].push({ id: c.id, nombre: c.nombre, monto: Number(c.monto), cuotaTotal: c.cuota_total, mesInicio: Number.isFinite(Number(c.mes_inicio)) ? Number(c.mes_inicio) : 0 });
@@ -265,7 +300,7 @@ export default function AppMovil() {
 
         // Reparación automática: si falta alguna de las 4 tarjetas, la vuelve a crear.
         const idsTarjetaPresentes = new Set(listaGastos.filter((g) => g.es_tarjeta).map((g) => g.tarjeta_id));
-        const faltantesTarjeta = TARJETAS.filter((t) => !idsTarjetaPresentes.has(t.id));
+        const faltantesTarjeta = listaTarjetas.filter((t) => !idsTarjetaPresentes.has(t.id));
         if (faltantesTarjeta.length > 0) {
           const nuevasFilas = faltantesTarjeta.map((t) => ({
             id: `gm-${t.id}`,
@@ -334,7 +369,7 @@ export default function AppMovil() {
 
   // ---- Carga de Compras ----
   const [formCompra, setFormCompra] = useState({
-    tarjetaId: persona.tarjetasPropias[0],
+    tarjetaId: TARJETAS_INICIALES.find((t) => t.titular === personaKey)?.id || "",
     tipo: "cuotas", // "cuotas" | "recurrente"
     descripcion: "",
     importe: "",
@@ -342,6 +377,11 @@ export default function AppMovil() {
     mesInicio: proximoMesIndex(),
   });
   const [cargoEnEdicion, setCargoEnEdicion] = useState(null); // { tarjetaId, cargoId } | null (null = alta nueva)
+  useEffect(() => {
+    if (cargoEnEdicion) return;
+    setFormCompra((prev) => (idsPropias.includes(prev.tarjetaId) ? prev : { ...prev, tarjetaId: idsPropias[0] || "" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarjetas]);
 
   // El mes de inicio del formulario arranca en el mes siguiente al actual
   // (mes vencido) cada vez que entrás a "Carga de Compras" para dar de alta
@@ -373,7 +413,7 @@ export default function AppMovil() {
   const cancelarEdicionCarga = () => {
     setCargoEnEdicion(null);
     setFormCompra({
-      tarjetaId: persona.tarjetasPropias[0],
+      tarjetaId: idsPropias[0] || "",
       tipo: "cuotas",
       descripcion: "",
       importe: "",
@@ -421,7 +461,7 @@ export default function AppMovil() {
       }
 
       setCargoEnEdicion(null);
-      setFormCompra({ tarjetaId: persona.tarjetasPropias[0], tipo: "cuotas", descripcion: "", importe: "", cuotas: "1", mesInicio: proximoMesIndex() });
+      setFormCompra({ tarjetaId: idsPropias[0] || "", tipo: "cuotas", descripcion: "", importe: "", cuotas: "1", mesInicio: proximoMesIndex() });
       setCompraGuardadaOk(true);
       setTimeout(() => setCompraGuardadaOk(false), 2200);
       return;
@@ -706,7 +746,7 @@ export default function AppMovil() {
               const totalIngresosExtra = ingresosExtra.reduce((acc, ig) => acc + ig.monto, 0);
               const ingresosMes = ingresoArielMes + ingresoCieloMes + totalIngresosExtra;
 
-              const sumaTarjetasDelMes = TARJETAS.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
+              const sumaTarjetasDelMes = tarjetas.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
               const sumaGastosFijos = gastosMensuales.filter((g) => !g.esTarjeta).reduce((acc, g) => acc + g.monto, 0);
               const gastosMes = sumaTarjetasDelMes + sumaGastosFijos;
 
@@ -770,15 +810,20 @@ export default function AppMovil() {
             <div className="bg-white rounded-3xl p-5">
               <label className="block text-sm text-slate-600 mb-2">Tarjeta</label>
               <div className="grid grid-cols-2 gap-2 mb-5">
-                {(cargoEnEdicion ? TARJETAS : TARJETAS.filter((t) => persona.tarjetasPropias.includes(t.id))).map((t) => {
+                {(cargoEnEdicion ? tarjetas : tarjetas.filter((t) => t.titular === personaKey)).map((t) => {
                   const activa = formCompra.tarjetaId === t.id;
                   return (
                     <button
                       key={t.id}
                       onClick={() => setFormCompra({ ...formCompra, tarjetaId: t.id })}
-                      className="rounded-2xl py-3 text-sm font-semibold border-2 transition-colors"
+                      className="rounded-2xl py-3 text-sm font-semibold border-2 transition-colors flex items-center justify-center gap-2"
                       style={activa ? { borderColor: "#0D9488", background: "#ECFDF5", color: "#0D9488" } : { borderColor: "#E2E8F0", color: "#334155" }}
                     >
+                      {logoDeTarjeta(t) && (
+                        <span className="bg-white rounded-md p-0.5 border border-slate-200 flex shrink-0">
+                          <img src={logoDeTarjeta(t)} alt="" className="h-5 w-auto block" />
+                        </span>
+                      )}
                       {t.nombre}
                     </button>
                   );
@@ -909,10 +954,11 @@ export default function AppMovil() {
                     </tr>
                   </thead>
                   <tbody>
-                    {TARJETAS.map((t) => (
+                    {tarjetas.map((t) => (
                       <tr key={t.id} className="border-t border-slate-100">
                         <td className="sticky left-0 bg-white z-10 px-4 py-3 whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                           <span className="inline-block h-2.5 w-2.5 rounded-full mr-2" style={{ background: t.color }} />
+                          {logoDeTarjeta(t) && <img src={logoDeTarjeta(t)} alt="" className="inline-block h-4 w-auto mr-1.5 align-middle rounded-sm" />}
                           <span className="font-semibold text-slate-800">{t.nombre}</span>
                         </td>
                         {mesesVista.map(({ m, i }) => {
@@ -932,7 +978,7 @@ export default function AppMovil() {
             <p className="text-center text-xs text-slate-400 mb-6">← Desliza para ver todos los meses →</p>
 
             {/* Un banner + lista de cargos por cada tarjeta */}
-            {TARJETAS.map((t) => {
+            {tarjetas.map((t) => {
               const todosLosCargos = cargosPorTarjeta[t.id] || [];
               // Solo se listan los cargos activos en el mes seleccionado en la cabecera —
               // los que ya terminaron (o todavía no arrancaron) quedan ocultos.
@@ -943,7 +989,13 @@ export default function AppMovil() {
                   <div className="p-5 text-white" style={{ background: t.color }}>
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-bold">{t.nombre}</span>
-                      <CreditCard size={20} className="opacity-80" />
+                      {logoDeTarjeta(t) ? (
+                        <span className="bg-white rounded-lg p-1 flex shrink-0 shadow-sm">
+                          <img src={logoDeTarjeta(t)} alt={t.banco} className="h-8 w-auto block" />
+                        </span>
+                      ) : (
+                        <CreditCard size={20} className="opacity-80" />
+                      )}
                     </div>
                     <p className="text-3xl font-bold mt-2">{fmt(totalMes)}</p>
                     <p className="text-white/80 text-sm">Total del mes</p>
@@ -1038,7 +1090,7 @@ export default function AppMovil() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 mb-1">Gastos Mensuales</h1>
             {(() => {
-              const sumaTarjetasDelMes = TARJETAS.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
+              const sumaTarjetasDelMes = tarjetas.reduce((acc, t) => acc + totalTarjetaEnMes(cargosPorTarjeta[t.id], mesIndex), 0);
               const sumaGastosFijos = gastosMensuales.filter((g) => !g.esTarjeta).reduce((acc, g) => acc + g.monto, 0);
               const totalGeneral = sumaTarjetasDelMes + sumaGastosFijos;
               return (
