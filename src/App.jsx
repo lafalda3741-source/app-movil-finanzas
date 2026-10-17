@@ -21,6 +21,7 @@ import {
   PiggyBank,
   CheckCircle2,
   RefreshCw,
+  ShoppingCart,
 } from "lucide-react";
 
 // ============================================================
@@ -144,6 +145,7 @@ const SECCIONES = [
   { id: "gastos", label: "Gastos Mensuales", icon: ListChecks },
   { id: "tarjetas", label: "Cuotas de Tarjetas", icon: CreditCard },
   { id: "ingresos", label: "Ingresos", icon: HandCoins },
+  { id: "cooperativa", label: "Cooperativa", icon: ShoppingCart },
 ];
 
 export default function AppMovil() {
@@ -366,6 +368,89 @@ export default function AppMovil() {
     };
     if (desbloqueado) cargarDatos();
   }, [desbloqueado, seccionActiva, recargarKey]);
+
+  // ---- Lista de la Cooperativa (compartida entre Ariel y Cielo) ----
+  const [itemsCoop, setItemsCoop] = useState([]);
+  const [coopCargando, setCoopCargando] = useState(false);
+  const [coopError, setCoopError] = useState(false);
+  const [nuevoProducto, setNuevoProducto] = useState("");
+  const [nuevaCantidad, setNuevaCantidad] = useState("");
+  const [coopEditando, setCoopEditando] = useState(null); // { id, producto, cantidad } | null
+
+  const cargarCoop = async () => {
+    setCoopCargando(true);
+    const { data, error } = await supabase.from("lista_cooperativa").select("*").order("creado_en", { ascending: true });
+    if (error) {
+      console.error("Error cargando lista de la cooperativa:", error);
+      setCoopError(true);
+    } else {
+      setCoopError(false);
+      setItemsCoop(data || []);
+    }
+    setCoopCargando(false);
+  };
+
+  useEffect(() => {
+    if (desbloqueado && seccionActiva === "cooperativa") cargarCoop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desbloqueado, seccionActiva, recargarKey]);
+
+  const agregarItemCoop = async () => {
+    const producto = nuevoProducto.trim();
+    if (!producto) return;
+    const cantidad = nuevaCantidad.trim();
+    const { error } = await supabase
+      .from("lista_cooperativa")
+      .insert({ producto, cantidad: cantidad || null, anotado_por: persona.nombre });
+    if (error) {
+      console.error("Error agregando producto:", error);
+      setCoopError(true);
+      return;
+    }
+    setNuevoProducto("");
+    setNuevaCantidad("");
+    cargarCoop();
+  };
+
+  const toggleItemCoop = async (item) => {
+    const nuevo = !item.comprado; // se calcula antes de actualizar el estado
+    setItemsCoop((prev) => prev.map((i) => (i.id === item.id ? { ...i, comprado: nuevo } : i)));
+    const { error } = await supabase.from("lista_cooperativa").update({ comprado: nuevo }).eq("id", item.id);
+    if (error) {
+      console.error("Error actualizando producto:", error);
+      cargarCoop();
+    }
+  };
+
+  const guardarEdicionCoop = async () => {
+    if (!coopEditando) return;
+    const producto = coopEditando.producto.trim();
+    if (!producto) return;
+    const cantidad = (coopEditando.cantidad || "").trim();
+    const { error } = await supabase
+      .from("lista_cooperativa")
+      .update({ producto, cantidad: cantidad || null })
+      .eq("id", coopEditando.id);
+    if (error) console.error("Error editando producto:", error);
+    setCoopEditando(null);
+    cargarCoop();
+  };
+
+  const borrarItemCoop = async (id) => {
+    setItemsCoop((prev) => prev.filter((i) => i.id !== id));
+    const { error } = await supabase.from("lista_cooperativa").delete().eq("id", id);
+    if (error) {
+      console.error("Error borrando producto:", error);
+      cargarCoop();
+    }
+  };
+
+  const limpiarCompradosCoop = async () => {
+    if (!window.confirm("¿Borrar todos los productos ya comprados?")) return;
+    const { error } = await supabase.from("lista_cooperativa").delete().eq("comprado", true);
+    if (error) console.error("Error limpiando comprados:", error);
+    cargarCoop();
+  };
 
   // ---- Carga de Compras ----
   const [formCompra, setFormCompra] = useState({
@@ -733,7 +818,7 @@ export default function AppMovil() {
 
       {/* Contenido */}
       <main className="p-4 pb-10">
-        {cargando && <p className="text-center text-sm text-slate-400 py-10">Cargando datos...</p>}
+        {cargando && seccionActiva !== "cooperativa" && <p className="text-center text-sm text-slate-400 py-10">Cargando datos...</p>}
 
         {!cargando && seccionActiva === "dashboard" && (
           <div>
@@ -1346,6 +1431,159 @@ export default function AppMovil() {
                 Guardar
               </button>
             </div>
+          </div>
+        )}
+        {seccionActiva === "cooperativa" && (
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 mb-1">Cooperativa</h1>
+            <p className="text-sm text-slate-500 mb-4">Lista de compras compartida entre Ariel y Cielo</p>
+
+            <div className="bg-white rounded-3xl p-4 mb-5">
+              <input
+                type="text"
+                value={nuevoProducto}
+                onChange={(e) => setNuevoProducto(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && agregarItemCoop()}
+                placeholder="Producto (ej: aceite, fideos...)"
+                className="w-full rounded-2xl bg-slate-50 px-4 py-3.5 text-base mb-2 outline-none"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={nuevaCantidad}
+                  onChange={(e) => setNuevaCantidad(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && agregarItemCoop()}
+                  placeholder="Cantidad (opcional)"
+                  className="flex-1 min-w-0 rounded-2xl bg-slate-50 px-4 py-3.5 text-base outline-none"
+                />
+                <button
+                  onClick={agregarItemCoop}
+                  disabled={!nuevoProducto.trim()}
+                  className="rounded-2xl px-5 text-white font-semibold flex items-center gap-1.5 disabled:opacity-40"
+                  style={{ background: persona.color }}
+                >
+                  <Plus size={18} /> Agregar
+                </button>
+              </div>
+            </div>
+
+            {coopError && (
+              <p className="text-sm text-red-500 mb-3 px-1">No se pudo conectar con la lista. Probá tocar "Actualizar".</p>
+            )}
+            {coopCargando && itemsCoop.length === 0 && (
+              <p className="text-center text-sm text-slate-400 py-6">Cargando lista...</p>
+            )}
+            {!coopCargando && !coopError && itemsCoop.length === 0 && (
+              <p className="text-center text-sm text-slate-400 py-6">Todavía no hay nada anotado.</p>
+            )}
+
+            {(() => {
+              const pendientes = itemsCoop.filter((i) => !i.comprado);
+              const comprados = itemsCoop.filter((i) => i.comprado);
+              const fila = (item, i, total) => {
+                const editando = coopEditando && coopEditando.id === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-3 px-4 py-3.5"
+                    style={i < total - 1 ? { borderBottom: "1px solid #F1F5F9" } : undefined}
+                  >
+                    <button
+                      onClick={() => toggleItemCoop(item)}
+                      className="h-6 w-6 rounded-full flex items-center justify-center shrink-0"
+                      style={item.comprado ? { background: "#0D9488" } : { border: "2px solid #E2E8F0" }}
+                      aria-label={item.comprado ? "Marcar como pendiente" : "Marcar como comprado"}
+                    >
+                      {item.comprado && <span className="text-white text-xs">✓</span>}
+                    </button>
+                    {editando ? (
+                      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                        <input
+                          type="text"
+                          value={coopEditando.producto}
+                          onChange={(e) => setCoopEditando({ ...coopEditando, producto: e.target.value })}
+                          className="w-full rounded-xl bg-slate-50 px-3 py-2 text-sm outline-none"
+                        />
+                        <input
+                          type="text"
+                          value={coopEditando.cantidad}
+                          onChange={(e) => setCoopEditando({ ...coopEditando, cantidad: e.target.value })}
+                          placeholder="Cantidad"
+                          className="w-full rounded-xl bg-slate-50 px-3 py-2 text-sm outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={guardarEdicionCoop}
+                            className="rounded-xl px-3 py-1.5 text-xs font-semibold text-white"
+                            style={{ background: persona.color }}
+                          >
+                            Guardar
+                          </button>
+                          <button
+                            onClick={() => setCoopEditando(null)}
+                            className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="text-sm font-medium break-words"
+                            style={{ color: item.comprado ? "#94A3B8" : "#1E293B", textDecoration: item.comprado ? "line-through" : "none" }}
+                          >
+                            {item.producto}
+                            {item.cantidad ? <span className="text-slate-400 font-normal"> · {item.cantidad}</span> : null}
+                          </p>
+                          {item.anotado_por && <p className="text-xs text-slate-400">Anotó {item.anotado_por}</p>}
+                        </div>
+                        <button
+                          onClick={() => setCoopEditando({ id: item.id, producto: item.producto, cantidad: item.cantidad || "" })}
+                          className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 active:bg-slate-100"
+                          aria-label="Editar"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => borrarItemCoop(item.id)}
+                          className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 active:bg-slate-100"
+                          aria-label="Borrar"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              };
+              return (
+                <>
+                  {pendientes.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-sm font-semibold text-slate-700 mb-2 px-1">Para comprar ({pendientes.length})</p>
+                      <div className="bg-white rounded-3xl overflow-hidden">
+                        {pendientes.map((it, i) => fila(it, i, pendientes.length))}
+                      </div>
+                    </div>
+                  )}
+                  {comprados.length > 0 && (
+                    <div className="mb-5">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <p className="text-sm font-semibold text-slate-700">Comprados ({comprados.length})</p>
+                        <button onClick={limpiarCompradosCoop} className="text-xs font-medium text-red-500">
+                          Limpiar comprados
+                        </button>
+                      </div>
+                      <div className="bg-white rounded-3xl overflow-hidden">
+                        {comprados.map((it, i) => fila(it, i, comprados.length))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </main>
